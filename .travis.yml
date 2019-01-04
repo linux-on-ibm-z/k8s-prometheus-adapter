@@ -1,33 +1,23 @@
 language: go
 
 go:
-- 1.8
+- '1.10'
 
 # blech, Travis downloads with capitals in DirectXMan12, which confuses go
 go_import_path: github.com/directxman12/k8s-prometheus-adapter
 
-addons:
-  apt:
-    sources:
-    - sourceline: 'ppa:masterminds/glide'
-    packages:
-    - glide
-
-install:
-- make -B vendor
-
 script: make verify
-
-cache:
-  directories:
-  - ~/.glide
 
 sudo: required
 services:
 - docker
 
 deploy:
-  provider: script
+- provider: script
   script: bash .travis-deploy.sh
   on:
     branch: master
+- provider: script
+  script: bash .travis-deploy.sh
+  on:
+    tags: true

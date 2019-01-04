@@ -8,6 +8,7 @@ OUT_DIR?=./_output
 VENDOR_DOCKERIZED=0
 
 VERSION?=latest
+GOIMAGE=golang:1.10
 
 ifeq ($(ARCH),amd64)
 	BASEIMAGE?=busybox
@@ -23,21 +24,31 @@ ifeq ($(ARCH),ppc64le)
 endif
 ifeq ($(ARCH),s390x)
 	BASEIMAGE?=s390x/busybox
+	GOIMAGE=s390x/golang:1.10
 endif
 
-.PHONY: all build docker-build push-% push test verify-gofmt gofmt verify
+.PHONY: all docker-build push-% push test verify-gofmt gofmt verify build-local-image
 
-all: build
-build: vendor
-	CGO_ENABLED=0 GOARCH=$(ARCH) go build -a -tags netgo -o $(OUT_DIR)/$(ARCH)/adapter github.com/directxman12/k8s-prometheus-adapter/cmd/adapter
+all: $(OUT_DIR)/$(ARCH)/adapter
 
-docker-build: vendor
+src_deps=$(shell find pkg cmd -type f -name "*.go")
+$(OUT_DIR)/%/adapter: $(src_deps)
+	CGO_ENABLED=0 GOARCH=$* go build -tags netgo -o $(OUT_DIR)/$*/adapter github.com/directxman12/k8s-prometheus-adapter/cmd/adapter
+	
+docker-build:
 	cp deploy/Dockerfile $(TEMP_DIR)
 	cd $(TEMP_DIR) && sed -i "s|BASEIMAGE|$(BASEIMAGE)|g" Dockerfile
 
-	docker run -it -v $(TEMP_DIR):/build -v $(shell pwd):/go/src/github.com/directxman12/k8s-prometheus-adapter -e GOARCH=$(ARCH) golang:1.8 /bin/bash -c "\
-		CGO_ENABLED=0 go build -a -tags netgo -o /build/adapter github.com/directxman12/k8s-prometheus-adapter/cmd/adapter"
+	docker run -it -v $(TEMP_DIR):/build -v $(shell pwd):/go/src/github.com/directxman12/k8s-prometheus-adapter -e GOARCH=$(ARCH) $(GOIMAGE) /bin/bash -c "\
+		CGO_ENABLED=0 go build -tags netgo -o /build/adapter github.com/directxman12/k8s-prometheus-adapter/cmd/adapter"
 
+	docker build -t $(REGISTRY)/$(IMAGE)-$(ARCH):$(VERSION) $(TEMP_DIR)
+	rm -rf $(TEMP_DIR)
+
+build-local-image: $(OUT_DIR)/$(ARCH)/adapter
+	cp deploy/Dockerfile $(TEMP_DIR)
+	cp  $(OUT_DIR)/$(ARCH)/adapter $(TEMP_DIR)
+	cd $(TEMP_DIR) && sed -i "s|BASEIMAGE|scratch|g" Dockerfile
 	docker build -t $(REGISTRY)/$(IMAGE)-$(ARCH):$(VERSION) $(TEMP_DIR)
 	rm -rf $(TEMP_DIR)
 
@@ -52,16 +63,16 @@ push: ./manifest-tool $(addprefix push-,$(ALL_ARCH))
 	curl -sSL https://github.com/estesp/manifest-tool/releases/download/v0.5.0/manifest-tool-linux-amd64 > manifest-tool
 	chmod +x manifest-tool
 
-vendor: glide.lock
+vendor: Gopkg.lock
 ifeq ($(VENDOR_DOCKERIZED),1)
-	docker run -it -v $(shell pwd):/go/src/github.com/directxman12/k8s-prometheus-adapter -w /go/src/github.com/directxman12/k8s-prometheus-adapter golang:1.8 /bin/bash -c "\
-		curl https://glide.sh/get | sh \
-		&& glide install -v"
+	docker run -it -v $(shell pwd):/go/src/github.com/directxman12/k8s-prometheus-adapter -w /go/src/github.com/directxman12/k8s-prometheus-adapter golang:1.10 /bin/bash -c "\
+		curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh \
+		&& dep ensure -vendor-only"
 else
-	glide install -v
+	dep ensure -vendor-only -v
 endif
 
-test: vendor
+test:
 	CGO_ENABLED=0 go test ./pkg/...
 
 verify-gofmt:
